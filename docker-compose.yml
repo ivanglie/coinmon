@@ -1,0 +1,34 @@
+services:
+  api:
+    build:
+      context: .
+    image: ivanglie/coinmon-api:latest
+    container_name: coinmon-api
+    restart: always
+    networks:
+      - internal
+
+  proxy:
+    image: caddy:latest
+    container_name: coinmon-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - DOMAIN=${DOMAIN}
+    depends_on:
+      - api
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

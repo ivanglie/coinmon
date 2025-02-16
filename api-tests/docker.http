@@ -1,0 +1,5 @@
+### Get price
+curl http://localhost/api/v1/spot/BTCUSDT
+
+### Get details
+curl http://localhost/api/v1/spot/BTCUSDT/details

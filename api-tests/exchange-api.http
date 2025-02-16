@@ -1,0 +1,8 @@
+### binance
+curl https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT
+
+### bybit
+curl https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT
+
+### bitget
+curl https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT
