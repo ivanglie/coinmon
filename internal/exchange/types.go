@@ -1,3 +1,4 @@
+// Package exchange provides types and functionality for working with crypto exchanges
 package exchange
 
 import "fmt"
@@ -11,15 +12,27 @@ const (
 	BITGET
 )
 
-// String returns string representation of exchange name
 func (n Name) String() string {
 	return [...]string{"binance", "bybit", "bitget"}[n]
+}
+
+// Exchange represents a cryptocurrency exchange with its configuration
+type Exchange struct {
+	Name      Name
+	BaseURL   string
+	PricePath string
 }
 
 // BinanceResponse represents Binance API response
 type BinanceResponse struct {
 	Symbol string `json:"symbol"`
 	Price  string `json:"price"`
+}
+
+// BinanceErrorResponse represents Binance error response
+type BinanceErrorResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
 }
 
 // BybitResponse represents Bybit API response
@@ -35,6 +48,12 @@ type BybitResponse struct {
 	} `json:"result"`
 }
 
+// BybitErrorResponse represents Bybit error response
+type BybitErrorResponse struct {
+	RetCode int    `json:"retCode"`
+	RetMsg  string `json:"retMsg"`
+}
+
 // BitgetResponse represents Bitget API response
 type BitgetResponse struct {
 	Code string `json:"code"`
@@ -45,11 +64,10 @@ type BitgetResponse struct {
 	} `json:"data"`
 }
 
-// Exchange represents a cryptocurrency exchange with its configuration
-type Exchange struct {
-	Name      Name
-	BaseURL   string
-	PricePath string
+// BitgetErrorResponse represents Bitget error response
+type BitgetErrorResponse struct {
+	Code  string `json:"code"`
+	Title string `json:"msg"`
 }
 
 func baseURLs() map[Name]string {

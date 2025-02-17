@@ -13,7 +13,6 @@ import (
 	"github.com/ivanglie/coinmon/pkg/log"
 )
 
-// firstPriceWithDetails fetches price from the first exchange that responds.
 func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (float64, string, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -23,6 +22,7 @@ func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (float6
 		err   error
 		ex    *exchange.Exchange
 	}
+
 	results := make(chan result, len(s.exchanges))
 
 	for _, e := range s.exchanges {
@@ -50,10 +50,10 @@ func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (float6
 		return result.price, result.ex.Name.String(), nil
 	}
 
+	log.Error("All exchanges failed")
 	return 0, "", fmt.Errorf("all exchanges failed. Last error: %v", lastErr)
 }
 
-// fetchPrice fetches price from a single exchange.
 func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair string) (float64, error) {
 	url := e.PriceURL(pair)
 	log.Info(fmt.Sprintf("Requesting %s price for %s: %s", e.Name, pair, url))
@@ -69,18 +69,37 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("unexpected status: %d", resp.StatusCode)
-	}
-
-	// Read and log response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, fmt.Errorf("read body: %w", err)
 	}
-	log.Info(fmt.Sprintf("Response from %s: %s", e.Name, string(body)))
 
-	// Create new reader for body
+	if resp.StatusCode != http.StatusOK {
+		switch e.Name {
+		case exchange.BINANCE:
+			var errResp exchange.BinanceErrorResponse
+			if err := json.Unmarshal(body, &errResp); err != nil {
+				return 0, fmt.Errorf("unexpected status: %d, body: %s", resp.StatusCode, body)
+			}
+			return 0, fmt.Errorf("binance error: code=%d, msg=%s", errResp.Code, errResp.Msg)
+
+		case exchange.BYBIT:
+			var errResp exchange.BybitErrorResponse
+			if err := json.Unmarshal(body, &errResp); err != nil {
+				return 0, fmt.Errorf("unexpected status: %d, body: %s", resp.StatusCode, body)
+			}
+			return 0, fmt.Errorf("bybit error: code=%d, msg=%s", errResp.RetCode, errResp.RetMsg)
+
+		case exchange.BITGET:
+			var errResp exchange.BitgetErrorResponse
+			if err := json.Unmarshal(body, &errResp); err != nil {
+				return 0, fmt.Errorf("unexpected status: %d, body: %s", resp.StatusCode, body)
+			}
+			return 0, fmt.Errorf("bitget error: code=%s, msg=%s", errResp.Code, errResp.Title)
+		}
+		return 0, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 
 	switch e.Name {
@@ -93,7 +112,6 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 		if err != nil {
 			return 0, fmt.Errorf("parse price: %w", err)
 		}
-		log.Info(fmt.Sprintf("Parsed Binance price: %f", price))
 		return price, nil
 
 	case exchange.BYBIT:
@@ -108,7 +126,6 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 		if err != nil {
 			return 0, fmt.Errorf("parse price: %w", err)
 		}
-		log.Info(fmt.Sprintf("Parsed Bybit price: %f", price))
 		return price, nil
 
 	case exchange.BITGET:
@@ -123,7 +140,6 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 		if err != nil {
 			return 0, fmt.Errorf("parse price: %w", err)
 		}
-		log.Info(fmt.Sprintf("Parsed Bitget price: %f", price))
 		return price, nil
 	}
 
