@@ -13,7 +13,7 @@ import (
 	"github.com/ivanglie/coinmon/pkg/log"
 )
 
-func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (float64, string, error) {
+func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (price float64, source string, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -27,7 +27,7 @@ func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (float6
 
 	for _, e := range s.exchanges {
 		go func(e *exchange.Exchange) {
-			price, err := s.fetchPrice(ctx, e, pair)
+			price, err = s.fetchPrice(ctx, e, pair)
 			select {
 			case <-ctx.Done():
 				return
@@ -47,7 +47,11 @@ func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (float6
 
 		log.Info(fmt.Sprintf("Got price from %s", result.ex.Name))
 		cancel()
-		return result.price, result.ex.Name.String(), nil
+
+		price = result.price
+		source = result.ex.Name.String()
+
+		return price, source, err
 	}
 
 	log.Error("All exchanges failed")
@@ -58,7 +62,7 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 	url := e.PriceURL(pair)
 	log.Info(fmt.Sprintf("Requesting %s price for %s: %s", e.Name, pair, url))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return 0, fmt.Errorf("create request: %w", err)
 	}

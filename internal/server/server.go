@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ivanglie/coinmon/internal/exchange"
+	"github.com/ivanglie/coinmon/pkg/log"
 )
 
 // DetailedResponse represents detailed price response
@@ -20,23 +21,39 @@ type DetailedResponse struct {
 // Server handles HTTP requests to exchanges
 type Server struct {
 	exchanges []*exchange.Exchange
+	srv       *http.Server
 	client    *http.Client
 }
 
 // New creates a new server instance
-func New() *Server {
+func New(addr string) *Server {
 	exchanges := []*exchange.Exchange{
 		exchange.New(exchange.BINANCE),
 		exchange.New(exchange.BYBIT),
 		exchange.New(exchange.BITGET),
 	}
 
-	return &Server{
+	s := &Server{
 		exchanges: exchanges,
+		srv: &http.Server{
+			Addr:         addr,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 10 * time.Second,
+			IdleTimeout:  120 * time.Second,
+		},
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 		},
 	}
+
+	http.HandleFunc("/api/v1/spot/", s.HandleSpot)
+
+	return s
+}
+
+// Start starts the server
+func (s *Server) Start() error {
+	return s.srv.ListenAndServe()
 }
 
 // HandleSpot handles /api/v1/spot/{pair} requests
@@ -63,14 +80,18 @@ func (s *Server) HandleSpot(w http.ResponseWriter, r *http.Request) {
 
 	if isDetailed {
 		w.Header().Set("Content-Type", "application/json")
-		response := DetailedResponse{
-			Pair:   pair,
-			Price:  price,
-			Source: source,
+		response := DetailedResponse{Pair: pair, Price: price, Source: source}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Error("Failed to encode response: " + err.Error())
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
-		json.NewEncoder(w).Encode(response)
 	} else {
 		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintf(w, "%f", price)
+		if _, err := fmt.Fprintf(w, "%f", price); err != nil {
+			log.Error("Failed to write response: " + err.Error())
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 	}
 }

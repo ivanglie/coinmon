@@ -1,4 +1,3 @@
-// Package exchange provides types and functionality for working with crypto exchanges
 package exchange
 
 import "fmt"
@@ -6,6 +5,7 @@ import "fmt"
 // Name represents supported cryptocurrency exchanges
 type Name int
 
+// Exchange names
 const (
 	BINANCE Name = iota
 	BYBIT
