@@ -9,6 +9,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
+      - name: Build image
+        run: sudo docker compose --env-file .env build
+        
+      - name: Save image
+        run: |
+          sudo docker save -o coinmon-api.tar ivanglie/coinmon-api:latest
+          sudo docker save -o coinmon-proxy.tar caddy:latest
+
+          sudo chmod 777 coinmon-api.tar
+          sudo chmod 777 coinmon-proxy.tar
         
       - name: Setup SSH key
         run: |
@@ -22,17 +33,6 @@ jobs:
           echo ${{ secrets.PASSWORD }} | sudo -S rm -r /usr/src/coinmon
           echo ${{ secrets.PASSWORD }} | sudo -S mkdir -p /usr/src/coinmon
           echo ${{ secrets.PASSWORD }} | sudo -S chmod 777 /usr/src/coinmon"
-
-      - name: Build image
-        run: docker compose build
-        
-      - name: Save image
-        run: |
-          sudo docker save -o coinmon-api.tar ivanglie/coinmon-api:latest
-          sudo docker save -o coinmon-proxy.tar caddy:latest
-
-          sudo chmod 777 coinmon-api.tar
-          sudo chmod 777 coinmon-proxy.tar
 
       - name: Copy files to remote host
         run: rsync -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" --archive --compress --delete docker-compose.yml .env Caddyfile coinmon-api.tar coinmon-proxy.tar ${{ secrets.USER }}@${{ secrets.HOST }}:/usr/src/coinmon
