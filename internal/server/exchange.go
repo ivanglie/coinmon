@@ -13,11 +13,7 @@ import (
 	"github.com/ivanglie/coinmon/pkg/log"
 )
 
-func (s *Server) firstPrice(ctx context.Context, pair string) (float64, error) {
-	price, _, err := s.firstPriceWithDetails(ctx, pair)
-	return price, err
-}
-
+// firstPriceWithDetails fetches price from the first exchange that responds.
 func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (float64, string, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -57,7 +53,7 @@ func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (float6
 	return 0, "", fmt.Errorf("all exchanges failed. Last error: %v", lastErr)
 }
 
-// fetchPrice fetches price from a single exchange
+// fetchPrice fetches price from a single exchange.
 func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair string) (float64, error) {
 	url := e.PriceURL(pair)
 	log.Info(fmt.Sprintf("Requesting %s price for %s: %s", e.Name, pair, url))
@@ -89,7 +85,7 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 
 	switch e.Name {
 	case exchange.BINANCE:
-		var binanceResp BinanceResponse
+		var binanceResp exchange.BinanceResponse
 		if err := json.NewDecoder(resp.Body).Decode(&binanceResp); err != nil {
 			return 0, fmt.Errorf("decode response: %w", err)
 		}
@@ -101,7 +97,7 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 		return price, nil
 
 	case exchange.BYBIT:
-		var bybitResp BybitResponse
+		var bybitResp exchange.BybitResponse
 		if err := json.NewDecoder(resp.Body).Decode(&bybitResp); err != nil {
 			return 0, fmt.Errorf("decode response: %w", err)
 		}
@@ -116,7 +112,7 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 		return price, nil
 
 	case exchange.BITGET:
-		var bitgetResp BitgetResponse
+		var bitgetResp exchange.BitgetResponse
 		if err := json.NewDecoder(resp.Body).Decode(&bitgetResp); err != nil {
 			return 0, fmt.Errorf("decode response: %w", err)
 		}

@@ -2,12 +2,20 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/ivanglie/coinmon/internal/exchange"
 )
+
+// DetailedResponse represents detailed price response
+type DetailedResponse struct {
+	Pair   string  `json:"pair"`
+	Price  float64 `json:"price"`
+	Source string  `json:"source"`
+}
 
 // Server handles HTTP requests to exchanges
 type Server struct {
@@ -43,30 +51,9 @@ func (s *Server) HandleSpot(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Missing trading pair", http.StatusBadRequest)
 		return
 	}
+	pair = strings.ToUpper(pair)
 
-	price, err := s.firstPrice(r.Context(), pair)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(price)
-}
-
-// HandleSpotDetails handles /api/v1/spot/{pair}/details requests
-func (s *Server) HandleSpotDetails(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	pair := strings.TrimPrefix(r.URL.Path, "/api/v1/spot/")
-	pair = strings.TrimSuffix(pair, "/details")
-	if pair == "" {
-		http.Error(w, "Missing trading pair", http.StatusBadRequest)
-		return
-	}
+	isDetailed := r.URL.Query().Get("details") == "true"
 
 	price, source, err := s.firstPriceWithDetails(r.Context(), pair)
 	if err != nil {
@@ -74,23 +61,16 @@ func (s *Server) HandleSpotDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := DetailedResponse{
-		Pair:   pair,
-		Price:  price,
-		Source: source,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
-}
-
-// Routes sets up the server routes
-func (s *Server) Routes() {
-	http.HandleFunc("/api/v1/spot/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/details") {
-			s.HandleSpotDetails(w, r)
-			return
+	if isDetailed {
+		w.Header().Set("Content-Type", "application/json")
+		response := DetailedResponse{
+			Pair:   pair,
+			Price:  price,
+			Source: source,
 		}
-		s.HandleSpot(w, r)
-	})
+		json.NewEncoder(w).Encode(response)
+	} else {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintf(w, "%f", price)
+	}
 }
