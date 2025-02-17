@@ -1,0 +1,49 @@
+name: Docker Image CI/CD
+
+on:
+  push:
+    branches: [ "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        
+      - name: Setup SSH key
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/id_rsa
+          echo "${{ secrets.KEY }}" > ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.HOST }} > ~/.ssh/known_hosts
+
+      - name: Create directory on remote host
+        run: |
+          ssh ${{ secrets.USER }}@${{ secrets.HOST }} "
+          echo ${{ secrets.PASSWORD }} | sudo -S rm -r /usr/src/coinmon
+          echo ${{ secrets.PASSWORD }} | sudo -S mkdir -p /usr/src/coinmon
+          echo ${{ secrets.PASSWORD }} | sudo -S chmod 777 /usr/src/coinmon"
+
+      - name: Build image
+        run: docker compose build
+        
+      - name: Save image
+        run: |
+          sudo docker save -o coinmon-api.tar ivanglie/coinmon-api:latest
+          sudo docker save -o coinmon-proxy.tar caddy:latest
+
+          sudo chmod 777 coinmon-api.tar
+          sudo chmod 777 coinmon-proxy.tar
+
+      - name: Copy files to remote host
+        run: rsync -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" --archive --compress --delete docker-compose.yml .env Caddyfile coinmon-api.tar coinmon-proxy.tar ${{ secrets.USER }}@${{ secrets.HOST }}:/usr/src/coinmon
+
+      - name: Load and run docker container on remote host
+        run: |
+          ssh ${{ secrets.USER }}@${{ secrets.HOST }} "
+          echo ${{ secrets.PASSWORD }} | sudo -S docker load -i /usr/src/coinmon/coinmon-api.tar
+          echo ${{ secrets.PASSWORD }} | sudo -S docker load -i /usr/src/coinmon/coinmon-proxy.tar
+
+          echo ${{ secrets.PASSWORD }} | sudo -S docker rm -f coinmon-api
+          echo ${{ secrets.PASSWORD }} | sudo -S docker rm -f coinmon-proxy
+
+          echo ${{ secrets.PASSWORD }} | sudo -S docker compose -f /usr/src/coinmon/docker-compose.yml down -v && docker compose -f /usr/src/coinmon/docker-compose.yml --env-file /usr/src/coinmon/.env up -d"
