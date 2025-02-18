@@ -10,12 +10,12 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Build and pull image
+      - name: Build and pull Docker images
         run: |
           sudo docker compose --env-file .env build
           sudo docker pull caddy:latest
         
-      - name: Save image
+      - name: Save Docker images
         run: |
           sudo docker save -o coinmon-api.tar ivanglie/coinmon-api:latest
           sudo docker save -o coinmon-proxy.tar caddy:latest
@@ -29,7 +29,7 @@ jobs:
           echo "${{ secrets.KEY }}" > ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.HOST }} > ~/.ssh/known_hosts
 
-      - name: Create directory on remote host
+      - name: Prepare directory on remote host
         run: |
           ssh ${{ secrets.USER }}@${{ secrets.HOST }} "
           echo ${{ secrets.PASSWORD }} | sudo -S rm -r /usr/src/coinmon
@@ -37,9 +37,11 @@ jobs:
           echo ${{ secrets.PASSWORD }} | sudo -S chmod 777 /usr/src/coinmon"
 
       - name: Copy files to remote host
-        run: rsync -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" --archive --compress --delete docker-compose.yml .env Caddyfile coinmon-api.tar coinmon-proxy.tar ${{ secrets.USER }}@${{ secrets.HOST }}:/usr/src/coinmon
+        run: rsync -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" --archive --compress --delete \
+              docker-compose.yml .env Caddyfile coinmon-api.tar coinmon-proxy.tar \
+              ${{ secrets.USER }}@${{ secrets.HOST }}:/usr/src/coinmon
 
-      - name: Load and run docker container on remote host
+      - name: Load and run Docker containers on remote host
         run: |
           ssh ${{ secrets.USER }}@${{ secrets.HOST }} "
           echo ${{ secrets.PASSWORD }} | sudo -S docker load -i /usr/src/coinmon/coinmon-api.tar
