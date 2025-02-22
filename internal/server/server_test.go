@@ -14,10 +14,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type mockHttpServer struct{}
+type mockHttpServer struct {
+	listenAndServeFunc func() error
+}
 
 func (m *mockHttpServer) ListenAndServe() error {
-	return nil
+	return m.listenAndServeFunc()
 }
 
 type mockHttpClient struct {
@@ -27,8 +29,6 @@ type mockHttpClient struct {
 func (m *mockHttpClient) Do(req *http.Request) (*http.Response, error) {
 	return m.doFunc(req)
 }
-
-type mockResponseFunc func(req *http.Request) (*http.Response, error)
 
 var (
 	server = &Server{}
@@ -48,8 +48,13 @@ func setupTest() {
 }
 
 func teardownTest() {
+	server.exchanges = nil
+	server.srv = nil
+	server.client = nil
 	server = nil
 }
+
+type mockResponseFunc func(req *http.Request) (*http.Response, error)
 
 func mockSuccessfulResponse(req *http.Request) (*http.Response, error) {
 	resp := &http.Response{
@@ -214,6 +219,45 @@ func mockJSONResponse(resp *http.Response, data interface{}) (*http.Response, er
 
 	resp.Body = io.NopCloser(bytes.NewReader(jsonResponse))
 	return resp, nil
+}
+
+func TestServer_Start(t *testing.T) {
+	tests := []struct {
+		name        string
+		serverError error
+		expectError bool
+	}{
+		{
+			name:        "server starts successfully",
+			serverError: nil,
+			expectError: false,
+		},
+		{
+			name:        "server fails to start",
+			serverError: fmt.Errorf("failed to start server"),
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				srv: &mockHttpServer{
+					listenAndServeFunc: func() error {
+						return tt.serverError
+					},
+				},
+			}
+
+			err := s.Start()
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Equal(t, tt.serverError.Error(), err.Error())
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestServer_fetchPrice(t *testing.T) {
