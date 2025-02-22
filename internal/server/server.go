@@ -1,9 +1,13 @@
 package server
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,11 +22,19 @@ type DetailedResponse struct {
 	Source string  `json:"source"`
 }
 
+type httpServer interface {
+	ListenAndServe() error
+}
+
+type httpClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 // Server handles HTTP requests to exchanges
 type Server struct {
 	exchanges []*exchange.Exchange
-	srv       *http.Server
-	client    *http.Client
+	srv       httpServer
+	client    httpClient
 }
 
 // New creates a new server instance
@@ -94,4 +106,150 @@ func (s *Server) HandleSpot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (price float64, source string, err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		price float64
+		ex    *exchange.Exchange
+		err   error
+	}
+
+	results := make(chan result, len(s.exchanges))
+
+	for _, e := range s.exchanges {
+		go func(e *exchange.Exchange) {
+			price, err = s.fetchPrice(ctx, e, pair)
+			select {
+			case <-ctx.Done():
+				return
+			case results <- result{price, e, err}:
+			}
+		}(e)
+	}
+
+	var lastErr error
+	for i := 0; i < len(s.exchanges); i++ {
+		result := <-results
+		if result.err != nil {
+			log.Error(fmt.Sprintf("Error from %s: %v", result.ex.Name, result.err))
+			lastErr = result.err
+			continue
+		}
+
+		log.Info(fmt.Sprintf("Got price from %s", result.ex.Name))
+		cancel()
+
+		price = result.price
+		source = result.ex.Name.String()
+
+		return price, source, err
+	}
+
+	log.Error("All exchanges failed")
+	return 0, "", fmt.Errorf("all exchanges failed. Last error: %v", lastErr)
+}
+
+func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair string) (float64, error) {
+	url := e.PriceURL(pair)
+	log.Info(fmt.Sprintf("Requesting %s price for %s: %s", e.Name, pair, url))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("do request: %w", err)
+	}
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("read body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		switch e.Name {
+		case exchange.BINANCE:
+			var r exchange.BinanceErrorResponse
+			if err := json.Unmarshal(body, &r); err != nil {
+				return 0, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, body)
+			}
+
+			return 0, fmt.Errorf("code=%d, msg=%s", r.Code, r.Msg)
+		case exchange.BYBIT:
+			var r exchange.BybitResponse
+			if err := json.Unmarshal(body, &r); err != nil {
+				return 0, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, body)
+			}
+
+			return 0, fmt.Errorf("code=%d, msg=%s", r.RetCode, r.RetMsg)
+		case exchange.BITGET: // TODO
+			var r exchange.BitgetResponse
+			if err := json.Unmarshal(body, &r); err != nil {
+				return 0, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, body)
+			}
+
+			return 0, fmt.Errorf("code=%s, msg=%s", r.Code, r.Msg)
+		}
+
+		return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+
+	switch e.Name {
+	case exchange.BINANCE:
+		var r exchange.BinanceResponse
+		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+			return 0, fmt.Errorf("decode response: %w", err)
+		}
+
+		price, err := strconv.ParseFloat(r.Price, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parse price: %w", err)
+		}
+
+		return price, nil
+	case exchange.BYBIT:
+		var r exchange.BybitResponse
+		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+			return 0, fmt.Errorf("decode response: %w", err)
+		}
+
+		if len(r.Result.List) == 0 {
+			return 0, fmt.Errorf("empty response")
+		}
+
+		price, err := strconv.ParseFloat(r.Result.List[0].LastPrice, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parse price: %w", err)
+		}
+
+		return price, nil
+	case exchange.BITGET:
+		var r exchange.BitgetResponse
+		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+			return 0, fmt.Errorf("decode response: %w", err)
+		}
+
+		if len(r.Data) == 0 {
+			return 0, fmt.Errorf("empty response")
+		}
+
+		price, err := strconv.ParseFloat(r.Data[0].LastPr, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parse price: %w", err)
+		}
+
+		return price, nil
+	}
+
+	return 0, fmt.Errorf("unknown exchange")
 }
