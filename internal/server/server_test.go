@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -43,13 +44,13 @@ var (
 func setupTest() {
 	server = New(":8080")
 	server.exchanges = exchanges
-	server.srv = &mockHttpServer{}
+	server.listener = &mockHttpServer{}
 	server.client = &mockHttpClient{}
 }
 
 func teardownTest() {
 	server.exchanges = nil
-	server.srv = nil
+	server.listener = nil
 	server.client = nil
 	server = nil
 }
@@ -242,7 +243,7 @@ func TestServer_Start(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Server{
-				srv: &mockHttpServer{
+				listener: &mockHttpServer{
 					listenAndServeFunc: func() error {
 						return tt.serverError
 					},
@@ -256,6 +257,175 @@ func TestServer_Start(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestServer_HandleSpot(t *testing.T) {
+	tests := []struct {
+		name             string
+		method           string
+		path             string
+		mockResponse     mockResponseFunc
+		expectedStatus   int
+		expectedResponse string
+		expectedContains bool
+	}{
+		{
+			name:             "successful price request",
+			method:           http.MethodGet,
+			path:             "/api/v1/spot/BTCUSDT",
+			mockResponse:     mockSuccessfulResponse,
+			expectedStatus:   http.StatusOK,
+			expectedResponse: "99999.990000",
+			expectedContains: false,
+		},
+		// {
+		// 	name:             "successful detailed request",
+		// 	method:           http.MethodGet,
+		// 	path:             "/api/v1/spot/BTCUSDT?details=true",
+		// 	mockResponse:     mockSuccessfulResponse,
+		// 	expectedStatus:   http.StatusOK,
+		// 	expectedResponse: `{"pair":"BTCUSDT","price":99999.97,"source":"bitget"}`,
+		// 	expectedContains: true,
+		// },
+		{
+			name:             "method not allowed",
+			method:           http.MethodPost,
+			path:             "/api/v1/spot/BTCUSDT",
+			mockResponse:     mockSuccessfulResponse,
+			expectedStatus:   http.StatusMethodNotAllowed,
+			expectedResponse: "Method not allowed\n",
+			expectedContains: false,
+		},
+		{
+			name:             "missing pair",
+			method:           http.MethodGet,
+			path:             "/api/v1/spot/",
+			mockResponse:     mockSuccessfulResponse,
+			expectedStatus:   http.StatusBadRequest,
+			expectedResponse: "Missing trading pair\n",
+			expectedContains: false,
+		},
+		{
+			name:             "invalid pair",
+			method:           http.MethodGet,
+			path:             "/api/v1/spot/INVALID",
+			mockResponse:     mockInvalidPairResponse,
+			expectedStatus:   http.StatusServiceUnavailable,
+			expectedResponse: "all exchanges failed",
+			expectedContains: true,
+		},
+		// {
+		// 	name:             "empty pair",
+		// 	method:           http.MethodGet,
+		// 	path:             "/api/v1/spot/  ",
+		// 	mockResponse:     mockEmptyPairResponse,
+		// 	expectedStatus:   http.StatusServiceUnavailable,
+		// 	expectedResponse: "all exchanges failed",
+		// 	expectedContains: true,
+		// },
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				exchanges: exchanges,
+				client: &mockHttpClient{
+					doFunc: tt.mockResponse,
+				},
+			}
+
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			w := httptest.NewRecorder()
+
+			s.HandleSpot(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			if tt.expectedContains {
+				assert.Contains(t, w.Body.String(), tt.expectedResponse)
+			} else {
+				assert.Equal(t, tt.expectedResponse, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestServer_firstPriceWithDetails(t *testing.T) {
+	type errorResponse struct {
+		Message string   `json:"message"`
+		Errors  []string `json:"errors"`
+	}
+
+	tests := []struct {
+		name           string
+		pair           string
+		mockResponse   mockResponseFunc
+		expectedPrice  float64
+		expectedSource string
+		expectError    bool
+		expectedErrors []string
+	}{
+		{
+			name:           "successful response from first exchange",
+			pair:           "BTCUSDT",
+			mockResponse:   mockSuccessfulResponse,
+			expectedPrice:  99999.99,
+			expectedSource: "binance",
+			expectError:    false,
+		},
+		{
+			name:         "all exchanges fail",
+			pair:         "INVALID",
+			mockResponse: mockInvalidPairResponse,
+			expectError:  true,
+			expectedErrors: []string{
+				"bitget: code=40034, msg=Parameter does not exist",
+				"bybit: code=10001, msg=Not supported symbols",
+				"binance: code=-1100, msg=Illegal characters found in parameter 'symbol'; legal range is '^[A-Z0-9_.]{1,20}$'.",
+			},
+		},
+		{
+			name:         "empty pair",
+			pair:         "",
+			mockResponse: mockEmptyPairResponse,
+			expectError:  true,
+			expectedErrors: []string{
+				"binance: code=-1105, msg=Parameter 'symbol' was empty.",
+				"bybit: code=10001, msg=Not supported symbols",
+				"bitget: code=40034, msg=Parameter does not exist",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				exchanges: exchanges,
+				client: &mockHttpClient{
+					doFunc: tt.mockResponse,
+				},
+			}
+
+			price, source, err := s.firstPriceWithDetails(context.Background(), tt.pair)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				var errResp errorResponse
+				assert.NoError(t, json.Unmarshal([]byte(err.Error()), &errResp))
+				assert.Equal(t, "all exchanges failed", errResp.Message)
+
+				for _, expectedErr := range tt.expectedErrors {
+					assert.Contains(t, errResp.Errors, expectedErr)
+				}
+				assert.Equal(t, len(tt.expectedErrors), len(errResp.Errors))
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedPrice, price)
+			assert.Equal(t, tt.expectedSource, source)
 		})
 	}
 }
@@ -361,7 +531,7 @@ func TestServer_fetchPrice(t *testing.T) {
 
 			price, err := server.fetchPrice(ctx, tt.exchange, tt.pair)
 			if tt.expectError {
-				t.Log(tt.exchange.Name, tt.pair, err)
+				// t.Log(tt.exchange.Name, tt.pair, err)
 				assert.Error(t, err)
 				return
 			}

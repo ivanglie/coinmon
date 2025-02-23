@@ -12,8 +12,15 @@ const (
 	BITGET
 )
 
+var names = [...]string{
+	BINANCE: "binance",
+	BYBIT:   "bybit",
+	BITGET:  "bitget",
+}
+
+// String returns exchange name
 func (n Name) String() string {
-	return [...]string{"binance", "bybit", "bitget"}[n]
+	return names[n]
 }
 
 // Exchange represents a cryptocurrency exchange with its configuration

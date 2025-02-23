@@ -33,7 +33,7 @@ type httpClient interface {
 // Server handles HTTP requests to exchanges
 type Server struct {
 	exchanges []*exchange.Exchange
-	srv       httpServer
+	listener  httpServer
 	client    httpClient
 }
 
@@ -47,7 +47,7 @@ func New(addr string) *Server {
 
 	s := &Server{
 		exchanges: exchanges,
-		srv: &http.Server{
+		listener: &http.Server{
 			Addr:         addr,
 			ReadTimeout:  5 * time.Second,
 			WriteTimeout: 10 * time.Second,
@@ -65,7 +65,7 @@ func New(addr string) *Server {
 
 // Start starts the server
 func (s *Server) Start() error {
-	return s.srv.ListenAndServe()
+	return s.listener.ListenAndServe()
 }
 
 // HandleSpot handles /api/v1/spot/{pair} requests
@@ -113,44 +113,56 @@ func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (price 
 	defer cancel()
 
 	type result struct {
-		price float64
-		ex    *exchange.Exchange
-		err   error
+		price  float64
+		source string
+		err    error
+	}
+
+	type errorResponse struct {
+		Message string   `json:"message"`
+		Errors  []string `json:"errors"`
 	}
 
 	results := make(chan result, len(s.exchanges))
 
 	for _, e := range s.exchanges {
 		go func(e *exchange.Exchange) {
-			price, err = s.fetchPrice(ctx, e, pair)
+			p, err := s.fetchPrice(ctx, e, pair)
 			select {
 			case <-ctx.Done():
 				return
-			case results <- result{price, e, err}:
+			case results <- result{p, e.Name.String(), err}:
 			}
 		}(e)
 	}
 
-	var lastErr error
+	var errors []string
 	for i := 0; i < len(s.exchanges); i++ {
-		result := <-results
-		if result.err != nil {
-			log.Error(fmt.Sprintf("Error from %s: %v", result.ex.Name, result.err))
-			lastErr = result.err
+		r := <-results
+		if r.err != nil {
+			errMsg := fmt.Sprintf("%s: %v", r.source, r.err)
+			log.Error("Error from " + errMsg)
+			errors = append(errors, errMsg)
 			continue
 		}
 
-		log.Info(fmt.Sprintf("Got price from %s", result.ex.Name))
+		log.Info(fmt.Sprintf("Got price %.2f from %s", r.price, r.source))
 		cancel()
-
-		price = result.price
-		source = result.ex.Name.String()
-
-		return price, source, err
+		return r.price, r.source, nil
 	}
 
-	log.Error("All exchanges failed")
-	return 0, "", fmt.Errorf("all exchanges failed. Last error: %v", lastErr)
+	errResp := errorResponse{
+		Message: "all exchanges failed",
+		Errors:  errors,
+	}
+
+	b, err := json.Marshal(errResp)
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to marshal error response: %v", err)
+	}
+
+	log.Error(string(b))
+	return 0, "", fmt.Errorf(string(b))
 }
 
 func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair string) (float64, error) {
