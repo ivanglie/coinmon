@@ -12,8 +12,15 @@ const (
 	BITGET
 )
 
+var names = [...]string{
+	BINANCE: "binance",
+	BYBIT:   "bybit",
+	BITGET:  "bitget",
+}
+
+// String returns exchange name
 func (n Name) String() string {
-	return [...]string{"binance", "bybit", "bitget"}[n]
+	return names[n]
 }
 
 // Exchange represents a cryptocurrency exchange with its configuration
@@ -48,12 +55,6 @@ type BybitResponse struct {
 	} `json:"result"`
 }
 
-// BybitErrorResponse represents Bybit error response
-type BybitErrorResponse struct {
-	RetCode int    `json:"retCode"`
-	RetMsg  string `json:"retMsg"`
-}
-
 // BitgetResponse represents Bitget API response
 type BitgetResponse struct {
 	Code string `json:"code"`
@@ -62,12 +63,6 @@ type BitgetResponse struct {
 		Symbol string `json:"symbol"`
 		LastPr string `json:"lastPr"`
 	} `json:"data"`
-}
-
-// BitgetErrorResponse represents Bitget error response
-type BitgetErrorResponse struct {
-	Code  string `json:"code"`
-	Title string `json:"msg"`
 }
 
 func baseURLs() map[Name]string {
