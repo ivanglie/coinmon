@@ -37,9 +37,7 @@ jobs:
           echo ${{ secrets.PASSWORD }} | sudo -S chmod 777 /usr/src/coinmon"
 
       - name: Copy files to remote host
-        run: rsync -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" --archive --compress --delete \
-              docker-compose.yml .env Caddyfile coinmon-api.tar coinmon-proxy.tar \
-              ${{ secrets.USER }}@${{ secrets.HOST }}:/usr/src/coinmon
+        run: rsync -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" --archive --compress --delete docker-compose.yml .env Caddyfile coinmon-api.tar coinmon-proxy.tar ${{ secrets.USER }}@${{ secrets.HOST }}:/usr/src/coinmon
 
       - name: Load and run Docker containers on remote host
         run: |
