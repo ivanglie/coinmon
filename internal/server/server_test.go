@@ -295,23 +295,31 @@ func TestServer_HandleSpot(t *testing.T) {
 		expectedContains bool
 	}{
 		{
-			name:             "successful price request",
-			method:           http.MethodGet,
-			path:             "/api/v1/spot/BTCUSDT",
-			mockResponse:     mockSuccessfulResponse,
+			name:   "successful price request",
+			method: http.MethodGet,
+			path:   "/api/v1/spot/BTCUSDT",
+			mockResponse: mockSuccessfulResponseWithDelay(map[string]time.Duration{
+				"binance": 50 * time.Millisecond,
+				"bybit":   100 * time.Millisecond,
+				"bitget":  150 * time.Millisecond,
+			}),
 			expectedStatus:   http.StatusOK,
 			expectedResponse: "99999.990000",
 			expectedContains: false,
 		},
-		// {
-		// 	name:             "successful detailed request",
-		// 	method:           http.MethodGet,
-		// 	path:             "/api/v1/spot/BTCUSDT?details=true",
-		// 	mockResponse:     mockSuccessfulResponse,
-		// 	expectedStatus:   http.StatusOK,
-		// 	expectedResponse: `{"pair":"BTCUSDT","price":99999.97,"source":"bitget"}`,
-		// 	expectedContains: true,
-		// },
+		{
+			name:   "successful detailed request",
+			method: http.MethodGet,
+			path:   "/api/v1/spot/BTCUSDT?details=true",
+			mockResponse: mockSuccessfulResponseWithDelay(map[string]time.Duration{
+				"binance": 50 * time.Millisecond,
+				"bybit":   100 * time.Millisecond,
+				"bitget":  150 * time.Millisecond,
+			}),
+			expectedStatus:   http.StatusOK,
+			expectedResponse: `{"pair":"BTCUSDT","price":99999.99,"source":"binance"}`,
+			expectedContains: true,
+		},
 		{
 			name:             "method not allowed",
 			method:           http.MethodPost,
@@ -339,15 +347,6 @@ func TestServer_HandleSpot(t *testing.T) {
 			expectedResponse: "all exchanges failed",
 			expectedContains: true,
 		},
-		// {
-		// 	name:             "empty pair",
-		// 	method:           http.MethodGet,
-		// 	path:             "/api/v1/spot/  ",
-		// 	mockResponse:     mockEmptyPairResponse,
-		// 	expectedStatus:   http.StatusServiceUnavailable,
-		// 	expectedResponse: "all exchanges failed",
-		// 	expectedContains: true,
-		// },
 	}
 
 	for _, tt := range tests {
