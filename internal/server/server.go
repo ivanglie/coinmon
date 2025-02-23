@@ -125,15 +125,15 @@ func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (price 
 
 	results := make(chan result, len(s.exchanges))
 
-	for _, e := range s.exchanges {
-		go func(e *exchange.Exchange) {
-			p, err := s.fetchPrice(ctx, e, pair)
+	for _, ex := range s.exchanges {
+		go func(ex *exchange.Exchange) {
+			p, e := s.fetchPrice(ctx, ex, pair)
 			select {
 			case <-ctx.Done():
 				return
-			case results <- result{p, e.Name.String(), err}:
+			case results <- result{p, ex.Name.String(), e}:
 			}
-		}(e)
+		}(ex)
 	}
 
 	var errors []string
@@ -162,7 +162,7 @@ func (s *Server) firstPriceWithDetails(ctx context.Context, pair string) (price 
 	}
 
 	log.Error(string(b))
-	return 0, "", fmt.Errorf(string(b))
+	return 0, "", fmt.Errorf("%s", string(b))
 }
 
 func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair string) (float64, error) {
@@ -202,7 +202,7 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 			}
 
 			return 0, fmt.Errorf("code=%d, msg=%s", r.RetCode, r.RetMsg)
-		case exchange.BITGET: // TODO
+		case exchange.BITGET:
 			var r exchange.BitgetResponse
 			if err := json.Unmarshal(body, &r); err != nil {
 				return 0, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, body)

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ivanglie/coinmon/internal/exchange"
 	"github.com/stretchr/testify/assert"
@@ -113,6 +114,28 @@ func mockSuccessfulResponse(req *http.Request) (*http.Response, error) {
 
 	default:
 		return nil, fmt.Errorf("unknown exchange in URL: %s", req.URL.String())
+	}
+}
+
+func mockSuccessfulResponseWithDelay(delays map[string]time.Duration) mockResponseFunc {
+	return func(req *http.Request) (*http.Response, error) {
+		// Определяем биржу из URL
+		var exchange string
+		switch {
+		case strings.Contains(req.URL.String(), "binance"):
+			exchange = "binance"
+		case strings.Contains(req.URL.String(), "bybit"):
+			exchange = "bybit"
+		case strings.Contains(req.URL.String(), "bitget"):
+			exchange = "bitget"
+		}
+
+		// Применяем задержку если она установлена для данной биржи
+		if delay, ok := delays[exchange]; ok {
+			time.Sleep(delay)
+		}
+
+		return mockSuccessfulResponse(req)
 	}
 }
 
@@ -368,9 +391,13 @@ func TestServer_firstPriceWithDetails(t *testing.T) {
 		expectedErrors []string
 	}{
 		{
-			name:           "successful response from first exchange",
-			pair:           "BTCUSDT",
-			mockResponse:   mockSuccessfulResponse,
+			name: "successful response from first exchange",
+			pair: "BTCUSDT",
+			mockResponse: mockSuccessfulResponseWithDelay(map[string]time.Duration{
+				"binance": 50 * time.Millisecond,
+				"bybit":   100 * time.Millisecond,
+				"bitget":  150 * time.Millisecond,
+			}),
 			expectedPrice:  99999.99,
 			expectedSource: "binance",
 			expectError:    false,
