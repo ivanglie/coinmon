@@ -13,8 +13,7 @@ services:
     container_name: coinmon-proxy
     ports:
       - "80:80"
-    volumes:
-      - ./Caddyfile.dev:/etc/caddy/Caddyfile
+    command: caddy reverse-proxy --from :80 --to api:8080
     depends_on:
       - api
     networks:
