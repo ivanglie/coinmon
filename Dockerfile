@@ -8,4 +8,5 @@ WORKDIR /usr/local/bin/
 RUN apk add --no-cache tzdata
 ENV TZ=Europe/Moscow
 COPY --from=builder /usr/src/coinmon/coinmon /usr/local/bin/coinmon
+COPY --from=builder /usr/src/coinmon/web ./web
 CMD ["coinmon"]
