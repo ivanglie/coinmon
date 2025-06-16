@@ -101,7 +101,7 @@ func (s *Server) HandleIndex(w http.ResponseWriter, r *http.Request) {
 
 	// Execute template with no data
 	var buf bytes.Buffer
-	if err := t.Execute(&buf, nil); err != nil { // nil - нет данных
+	if err := t.Execute(&buf, nil); err != nil {
 		log.Error("Failed to execute template: " + err.Error())
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
