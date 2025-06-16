@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coinmon API</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; }
+        h1 { color: #2c3e50; }
+        code { background: #f8f9fa; padding: 0.2rem 0.4rem; border-radius: 3px; font-size: 0.9em; }
+        .endpoint { background: #e3f2fd; padding: 1rem; border-radius: 5px; margin: 0.5rem 0; }
+        .method { color: #1976d2; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>🪙 Coinmon API</h1>
+    <p>Cryptocurrency price API with data from multiple exchanges</p>
+    
+    <h2>📊 Live Examples:</h2>
+    <div class="endpoint">
+        <span class="method">GET</span> <a href="/api/v1/spot/BTCUSDT">/api/v1/spot/BTCUSDT</a>
+        <p>Returns: <code>96297.49</code></p>
+    </div>
+    
+    <div class="endpoint">
+        <span class="method">GET</span> <a href="/api/v1/spot/ETHUSDT">/api/v1/spot/ETHUSDT</a>
+        <p>Returns: <code>3456.78</code></p>
+    </div>
+    
+    <div class="endpoint">
+        <span class="method">GET</span> <a href="/api/v1/spot/BTCUSDT?details=true">/api/v1/spot/BTCUSDT?details=true</a>
+        <p>Returns: <code>{"pair":"BTCUSDT","price":96297.49,"source":"binance"}</code></p>
+    </div>
+    
+    <h2>📈 Spreadsheet Integration:</h2>
+    <p><strong>Microsoft Excel:</strong><br>
+    <code>=WEBSERVICE("https://coinmon.cc/api/v1/spot/BTCUSDT")</code></p>
+    
+    <p><strong>Google Sheets:</strong><br>
+    <code>=IMPORTDATA("https://coinmon.cc/api/v1/spot/BTCUSDT")</code></p>
+    
+    <h2>🔗 Supported Exchanges:</h2>
+    <ul>
+        <li>Binance</li>
+        <li>Bybit</li>
+        <li>Bitget</li>
+    </ul>
+</body>
+</html>
