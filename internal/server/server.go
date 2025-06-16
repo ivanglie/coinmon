@@ -2,9 +2,11 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"strconv"
@@ -58,6 +60,7 @@ func New(addr string) *Server {
 		},
 	}
 
+	http.HandleFunc("/", s.HandleIndex)
 	http.HandleFunc("/api/v1/spot/", s.HandleSpot)
 
 	return s
@@ -66,6 +69,61 @@ func New(addr string) *Server {
 // Start starts the server
 func (s *Server) Start() error {
 	return s.listener.ListenAndServe()
+}
+
+// HandleIndex serves the main page
+func (s *Server) HandleIndex(w http.ResponseWriter, r *http.Request) {
+	// Only serve root path
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Only allow GET method
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Set security headers
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("X-XSS-Protection", "1; mode=block")
+
+	// Parse template
+	t, err := template.ParseFiles("web/template/index.html")
+	if err != nil {
+		log.Error("Failed to parse template: " + err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Execute template with no data
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, nil); err != nil { // nil - нет данных
+		log.Error("Failed to execute template: " + err.Error())
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	content := buf.Bytes()
+
+	// Enable compression if client supports it
+	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		w.Header().Set("Content-Encoding", "gzip")
+		gzw := gzip.NewWriter(w)
+		defer gzw.Close()
+		if _, err := gzw.Write(content); err != nil {
+			log.Error("Failed to write gzipped response: " + err.Error())
+			return
+		}
+		return
+	}
+
+	if _, err := w.Write(content); err != nil {
+		log.Error("Failed to write response: " + err.Error())
+	}
 }
 
 // HandleSpot handles /api/v1/spot/{pair} requests

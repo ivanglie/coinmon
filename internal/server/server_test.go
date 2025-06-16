@@ -2,12 +2,15 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -119,7 +122,6 @@ func mockSuccessfulResponse(req *http.Request) (*http.Response, error) {
 
 func mockSuccessfulResponseWithDelay(delays map[string]time.Duration) mockResponseFunc {
 	return func(req *http.Request) (*http.Response, error) {
-		// Определяем биржу из URL
 		var exchange string
 		switch {
 		case strings.Contains(req.URL.String(), "binance"):
@@ -130,7 +132,6 @@ func mockSuccessfulResponseWithDelay(delays map[string]time.Duration) mockRespon
 			exchange = "bitget"
 		}
 
-		// Применяем задержку если она установлена для данной биржи
 		if delay, ok := delays[exchange]; ok {
 			time.Sleep(delay)
 		}
@@ -279,6 +280,311 @@ func TestServer_Start(t *testing.T) {
 				assert.Equal(t, tt.serverError.Error(), err.Error())
 			} else {
 				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestServer_HandleIndex(t *testing.T) {
+	tmpDir := t.TempDir()
+	templateDir := filepath.Join(tmpDir, "web", "template")
+	err := os.MkdirAll(templateDir, 0755)
+	assert.NoError(t, err)
+
+	indexHTML := `<!DOCTYPE html>
+<html>
+<head><title>Test Coinmon API</title></head>
+<body>
+	<h1>🪙 Test Coinmon API</h1>
+	<p>Cryptocurrency price API with data from multiple exchanges</p>
+	<div class="endpoint">
+		<a href="/api/v1/spot/BTCUSDT">/api/v1/spot/BTCUSDT</a>
+	</div>
+</body>
+</html>`
+
+	err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(indexHTML), 0644)
+	assert.NoError(t, err)
+
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tmpDir)
+
+	tests := []struct {
+		name           string
+		method         string
+		path           string
+		acceptEncoding string
+		expectedStatus int
+		expectedType   string
+		expectedBody   string
+		checkHeaders   bool
+	}{
+		{
+			name:           "successful root request",
+			method:         http.MethodGet,
+			path:           "/",
+			expectedStatus: http.StatusOK,
+			expectedType:   "text/html; charset=utf-8",
+			expectedBody:   "Test Coinmon API",
+			checkHeaders:   true,
+		},
+		{
+			name:           "contains API endpoint link",
+			method:         http.MethodGet,
+			path:           "/",
+			expectedStatus: http.StatusOK,
+			expectedBody:   "/api/v1/spot/BTCUSDT",
+		},
+		{
+			name:           "root request with gzip compression",
+			method:         http.MethodGet,
+			path:           "/",
+			acceptEncoding: "gzip, deflate",
+			expectedStatus: http.StatusOK,
+			expectedType:   "text/html; charset=utf-8",
+			expectedBody:   "Test Coinmon API",
+			checkHeaders:   true,
+		},
+		{
+			name:           "non-root path returns 404",
+			method:         http.MethodGet,
+			path:           "/nonexistent",
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "POST method not allowed",
+			method:         http.MethodPost,
+			path:           "/",
+			expectedStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:           "PUT method not allowed",
+			method:         http.MethodPut,
+			path:           "/",
+			expectedStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:           "DELETE method not allowed",
+			method:         http.MethodDelete,
+			path:           "/",
+			expectedStatus: http.StatusMethodNotAllowed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				exchanges: exchanges,
+				listener: &mockHttpServer{
+					listenAndServeFunc: func() error { return nil },
+				},
+				client: &mockHttpClient{
+					doFunc: mockSuccessfulResponse,
+				},
+			}
+
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			if tt.acceptEncoding != "" {
+				req.Header.Set("Accept-Encoding", tt.acceptEncoding)
+			}
+
+			w := httptest.NewRecorder()
+			s.HandleIndex(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			if tt.expectedType != "" {
+				assert.Equal(t, tt.expectedType, w.Header().Get("Content-Type"))
+			}
+
+			if tt.expectedBody != "" {
+				body := w.Body.String()
+
+				if w.Header().Get("Content-Encoding") == "gzip" {
+					gr, err := gzip.NewReader(w.Body)
+					assert.NoError(t, err)
+					defer gr.Close()
+
+					decompressed, err := io.ReadAll(gr)
+					assert.NoError(t, err)
+					body = string(decompressed)
+				}
+
+				assert.Contains(t, body, tt.expectedBody)
+			}
+
+			if tt.checkHeaders && tt.expectedStatus == http.StatusOK {
+				assert.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
+				assert.Equal(t, "DENY", w.Header().Get("X-Frame-Options"))
+				assert.Equal(t, "1; mode=block", w.Header().Get("X-XSS-Protection"))
+			}
+		})
+	}
+}
+
+func TestServer_HandleIndex_TemplateNotFound(t *testing.T) {
+	s := &Server{
+		exchanges: exchanges,
+		listener: &mockHttpServer{
+			listenAndServeFunc: func() error { return nil },
+		},
+		client: &mockHttpClient{
+			doFunc: mockSuccessfulResponse,
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	s.HandleIndex(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), "no such file or directory")
+}
+
+func TestServer_HandleIndex_InvalidTemplateSyntax(t *testing.T) {
+	tmpDir := t.TempDir()
+	templateDir := filepath.Join(tmpDir, "web", "template")
+	err := os.MkdirAll(templateDir, 0755)
+	assert.NoError(t, err)
+
+	invalidHTML := `<html><body>{{range}}</body></html>`
+	err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(invalidHTML), 0644)
+	assert.NoError(t, err)
+
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tmpDir)
+
+	s := &Server{
+		exchanges: exchanges,
+		listener: &mockHttpServer{
+			listenAndServeFunc: func() error { return nil },
+		},
+		client: &mockHttpClient{
+			doFunc: mockSuccessfulResponse,
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	s.HandleIndex(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), "range")
+}
+
+func TestServer_HandleIndex_TemplateExecuteError(t *testing.T) {
+	tmpDir := t.TempDir()
+	templateDir := filepath.Join(tmpDir, "web", "template")
+	err := os.MkdirAll(templateDir, 0755)
+	assert.NoError(t, err)
+
+	errorHTML := `<html><body>{{printf .NonExistent}}</body></html>`
+	err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(errorHTML), 0644)
+	assert.NoError(t, err)
+
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tmpDir)
+
+	s := &Server{
+		exchanges: exchanges,
+		listener: &mockHttpServer{
+			listenAndServeFunc: func() error { return nil },
+		},
+		client: &mockHttpClient{
+			doFunc: mockSuccessfulResponse,
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	s.HandleIndex(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), "Internal server error")
+}
+
+func TestServer_HandleIndex_GzipCompression(t *testing.T) {
+	tmpDir := t.TempDir()
+	templateDir := filepath.Join(tmpDir, "web", "template")
+	err := os.MkdirAll(templateDir, 0755)
+	assert.NoError(t, err)
+
+	largeHTML := `<!DOCTYPE html><html><head><title>Large Page</title></head><body>`
+	for i := 0; i < 100; i++ {
+		largeHTML += fmt.Sprintf("<p>This is paragraph number %d with some content to make it larger.</p>", i)
+	}
+	largeHTML += `</body></html>`
+
+	err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(largeHTML), 0644)
+	assert.NoError(t, err)
+
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tmpDir)
+
+	tests := []struct {
+		name           string
+		acceptEncoding string
+		expectGzip     bool
+	}{
+		{
+			name:           "with gzip support",
+			acceptEncoding: "gzip, deflate",
+			expectGzip:     true,
+		},
+		{
+			name:           "without gzip support",
+			acceptEncoding: "deflate, br",
+			expectGzip:     false,
+		},
+		{
+			name:           "no accept-encoding header",
+			acceptEncoding: "",
+			expectGzip:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				exchanges: exchanges,
+				listener: &mockHttpServer{
+					listenAndServeFunc: func() error { return nil },
+				},
+				client: &mockHttpClient{
+					doFunc: mockSuccessfulResponse,
+				},
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.acceptEncoding != "" {
+				req.Header.Set("Accept-Encoding", tt.acceptEncoding)
+			}
+
+			w := httptest.NewRecorder()
+			s.HandleIndex(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			if tt.expectGzip {
+				assert.Equal(t, "gzip", w.Header().Get("Content-Encoding"))
+
+				gr, err := gzip.NewReader(w.Body)
+				assert.NoError(t, err)
+				defer gr.Close()
+
+				decompressed, err := io.ReadAll(gr)
+				assert.NoError(t, err)
+				assert.Contains(t, string(decompressed), "Large Page")
+			} else {
+				assert.Empty(t, w.Header().Get("Content-Encoding"))
+				assert.Contains(t, w.Body.String(), "Large Page")
 			}
 		})
 	}
