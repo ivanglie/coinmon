@@ -1,3 +1,4 @@
+// Package server provides HTTP server implementation for the coinmon API.
 package server
 
 import (
@@ -45,6 +46,7 @@ func New(addr string) *Server {
 		exchange.New(exchange.BINANCE),
 		exchange.New(exchange.BYBIT),
 		exchange.New(exchange.BITGET),
+		exchange.New(exchange.KRAKEN),
 	}
 
 	s := &Server{
@@ -113,7 +115,11 @@ func (s *Server) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 		w.Header().Set("Content-Encoding", "gzip")
 		gzw := gzip.NewWriter(w)
-		defer gzw.Close()
+		defer func() {
+			if err := gzw.Close(); err != nil {
+				log.Error("Failed to close gzip writer: " + err.Error())
+			}
+		}()
 		if _, err := gzw.Write(content); err != nil {
 			log.Error("Failed to write gzipped response: " + err.Error())
 			return
@@ -227,7 +233,7 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 	url := e.PriceURL(pair)
 	log.Info(fmt.Sprintf("Requesting %s price for %s: %s", e.Name, pair, url))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody) //nolint:gosec // URL is constructed from static exchange configuration, not user input
 	if err != nil {
 		return 0, fmt.Errorf("create request: %w", err)
 	}
@@ -237,7 +243,7 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 		return 0, fmt.Errorf("do request: %w", err)
 	}
 
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -267,6 +273,11 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 			}
 
 			return 0, fmt.Errorf("code=%s, msg=%s", r.Code, r.Msg)
+		case exchange.KRAKEN:
+			var r exchange.KrakenResponse
+			if err := json.Unmarshal(body, &r); err != nil {
+				return 0, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, body)
+			}
 		}
 
 		return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -319,6 +330,31 @@ func (s *Server) fetchPrice(ctx context.Context, e *exchange.Exchange, pair stri
 		}
 
 		return price, nil
+	case exchange.KRAKEN:
+		var r exchange.KrakenResponse
+		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+			return 0, fmt.Errorf("decode response: %w", err)
+		}
+
+		if len(r.Error) > 0 {
+			p := strings.SplitN(r.Error[0], ":", 2)
+			code, msg := p[0], ""
+			if len(p) == 2 {
+				msg = strings.TrimSpace(p[1])
+			}
+			return 0, fmt.Errorf("code=%s, msg=%s", code, msg)
+		}
+
+		for _, ticker := range r.Result {
+			price, err := strconv.ParseFloat(ticker.C[0], 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse price: %w", err)
+			}
+
+			return price, nil
+		}
+
+		return 0, fmt.Errorf("empty response")
 	}
 
 	return 0, fmt.Errorf("unknown exchange")

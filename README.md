@@ -1,12 +1,12 @@
 # Coinmon
 
-A service for retrieving cryptocurrency data from multiple exchanges. Can be integrated with spreadsheets, monitoring tools and trading dashboards.
+A service for retrieving real-time cryptocurrency prices. Queries multiple exchanges concurrently and returns the fastest response. Can be integrated with spreadsheets, monitoring tools and trading dashboards.
 
 ## Features
 
 - **Simple approach**: REST API compatible with Microsoft Excel, Google Sheets and similar tools
 - **Anonymous access**: No sign ups required, no API keys required
-- **Multiple sources**: Data from major exchanges such as Binance, Bybit, Bitget
+- **Multiple sources**: Data from major exchanges such as Binance, Bybit, Bitget, Kraken
 - **Efficient implementation**: Concurrent request processing
 - **Configurable output**: Basic price or detailed response format
 

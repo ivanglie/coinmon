@@ -1,3 +1,4 @@
+// Package main is the entry point of the application.
 package main
 
 import (
@@ -10,10 +11,10 @@ import (
 func main() {
 	log.SetDefaultLogConfig()
 
-	server := server.New(":8080")
+	s := server.New(":8080")
 
 	log.Info("Starting server on :8080")
-	if err := server.Start(); err != nil {
+	if err := s.Start(); err != nil {
 		log.Error(err.Error())
 		os.Exit(1)
 	}
