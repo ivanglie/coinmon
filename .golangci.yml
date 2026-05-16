@@ -1,33 +1,10 @@
+version: "2"
+
 run:
   timeout: 5m
-  tests: false
-
-linters-settings:
-  govet:
-    enable:
-      - shadow
-  goconst:
-    min-len: 2
-    min-occurrences: 2
-  misspell:
-    locale: US
-  lll:
-    line-length: 140
-  gocritic:
-    enabled-tags:
-      - performance
-      - style
-      - experimental
-    disabled-checks:
-      - wrapperFunc
-      - hugeParam
-      - rangeValCopy
-      - singleCaseSwitch
-      - ifElseChain
-  copyloopvar:
-    disable: true
 
 linters:
+  disable-all: true
   enable:
     - revive
     - govet
@@ -38,17 +15,37 @@ linters:
     - dupl
     - misspell
     - unparam
-    - typecheck
     - ineffassign
-    - stylecheck
     - gochecknoinits
     - gocritic
     - nakedret
-    - gosimple
     - prealloc
+  settings:
+    govet:
+      enable:
+        - shadow
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    misspell:
+      locale: US
+    lll:
+      line-length: 140
+    gocritic:
+      enabled-tags:
+        - performance
+        - style
+        - experimental
+      disabled-checks:
+        - wrapperFunc
+        - hugeParam
+        - rangeValCopy
+        - singleCaseSwitch
+        - ifElseChain
+
+formatters:
+  enable:
     - gofmt
-  fast: false
-  disable-all: true
 
 issues:
   exclude-dirs:

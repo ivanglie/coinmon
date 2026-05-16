@@ -19,19 +19,19 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type mockHttpServer struct {
+type mockHTTPServer struct {
 	listenAndServeFunc func() error
 }
 
-func (m *mockHttpServer) ListenAndServe() error {
+func (m *mockHTTPServer) ListenAndServe() error {
 	return m.listenAndServeFunc()
 }
 
-type mockHttpClient struct {
+type mockHTTPClient struct {
 	doFunc func(req *http.Request) (*http.Response, error)
 }
 
-func (m *mockHttpClient) Do(req *http.Request) (*http.Response, error) {
+func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	return m.doFunc(req)
 }
 
@@ -42,14 +42,15 @@ var (
 		exchange.New(exchange.BINANCE),
 		exchange.New(exchange.BYBIT),
 		exchange.New(exchange.BITGET),
+		exchange.New(exchange.KRAKEN),
 	}
 )
 
 func setupTest() {
 	server = New(":8080")
 	server.exchanges = exchanges
-	server.listener = &mockHttpServer{}
-	server.client = &mockHttpClient{}
+	server.listener = &mockHTTPServer{}
+	server.client = &mockHTTPClient{}
 }
 
 func teardownTest() {
@@ -115,6 +116,19 @@ func mockSuccessfulResponse(req *http.Request) (*http.Response, error) {
 		}
 		return mockJSONResponse(resp, bitgetResponse)
 
+	case strings.Contains(req.URL.String(), "kraken"):
+		krakenResponse := exchange.KrakenResponse{
+			Error: []string{},
+			Result: map[string]struct {
+				C [2]string `json:"c"`
+			}{
+				"USDTZUSD": {
+					C: [2]string{"99999.96", "1.00"},
+				},
+			},
+		}
+		return mockJSONResponse(resp, krakenResponse)
+
 	default:
 		return nil, fmt.Errorf("unknown exchange in URL: %s", req.URL.String())
 	}
@@ -122,17 +136,19 @@ func mockSuccessfulResponse(req *http.Request) (*http.Response, error) {
 
 func mockSuccessfulResponseWithDelay(delays map[string]time.Duration) mockResponseFunc {
 	return func(req *http.Request) (*http.Response, error) {
-		var exchange string
+		var e string
 		switch {
 		case strings.Contains(req.URL.String(), "binance"):
-			exchange = "binance"
+			e = "binance"
 		case strings.Contains(req.URL.String(), "bybit"):
-			exchange = "bybit"
+			e = "bybit"
 		case strings.Contains(req.URL.String(), "bitget"):
-			exchange = "bitget"
+			e = "bitget"
+		case strings.Contains(req.URL.String(), "kraken"):
+			e = "kraken"
 		}
 
-		if delay, ok := delays[exchange]; ok {
+		if delay, ok := delays[e]; ok {
 			time.Sleep(delay)
 		}
 
@@ -167,74 +183,39 @@ func mockErrorResponse(req *http.Request) (*http.Response, error) {
 		}
 		return mockJSONResponse(resp, bitgetResponse)
 
-	default:
-		return nil, fmt.Errorf("unknown exchange in URL: %s", req.URL.String())
-	}
-}
-
-func mockInvalidPairResponse(req *http.Request) (*http.Response, error) {
-	resp := &http.Response{
-		StatusCode: http.StatusBadRequest,
-	}
-
-	switch {
-	case strings.Contains(req.URL.String(), "binance"):
-		binanceResponse := exchange.BinanceErrorResponse{
-			Code: -1100,
-			Msg:  "Illegal characters found in parameter 'symbol'; legal range is '^[A-Z0-9_.]{1,20}$'.",
-		}
-		return mockJSONResponse(resp, binanceResponse)
-
-	case strings.Contains(req.URL.String(), "bybit"):
-		bybitResponse := exchange.BybitResponse{
-			RetCode: 10001,
-			RetMsg:  "Not supported symbols",
-		}
-		return mockJSONResponse(resp, bybitResponse)
-
-	case strings.Contains(req.URL.String(), "bitget"):
-		bitgetResponse := exchange.BitgetResponse{
-			Code: "40034",
-			Msg:  "Parameter does not exist",
-		}
-		return mockJSONResponse(resp, bitgetResponse)
+	case strings.Contains(req.URL.String(), "kraken"):
+		resp.StatusCode = http.StatusForbidden
+		resp.Body = io.NopCloser(bytes.NewReader([]byte("Forbidden")))
+		return resp, nil
 
 	default:
 		return nil, fmt.Errorf("unknown exchange in URL: %s", req.URL.String())
 	}
 }
 
-func mockEmptyPairResponse(req *http.Request) (*http.Response, error) {
-	resp := &http.Response{
-		StatusCode: http.StatusBadRequest,
-	}
-
-	switch {
-	case strings.Contains(req.URL.String(), "binance"):
-		binanceResponse := exchange.BinanceErrorResponse{
-			Code: -1105,
-			Msg:  "Parameter 'symbol' was empty.",
+func mockPairErrorResponse(binanceCode int, binanceMsg string) mockResponseFunc {
+	return func(req *http.Request) (*http.Response, error) {
+		resp := &http.Response{StatusCode: http.StatusBadRequest}
+		switch {
+		case strings.Contains(req.URL.String(), "binance"):
+			return mockJSONResponse(resp, exchange.BinanceErrorResponse{Code: binanceCode, Msg: binanceMsg})
+		case strings.Contains(req.URL.String(), "bybit"):
+			return mockJSONResponse(resp, exchange.BybitResponse{RetCode: 10001, RetMsg: "Not supported symbols"})
+		case strings.Contains(req.URL.String(), "bitget"):
+			return mockJSONResponse(resp, exchange.BitgetResponse{Code: "40034", Msg: "Parameter does not exist"})
+		case strings.Contains(req.URL.String(), "kraken"):
+			resp.StatusCode = http.StatusOK
+			return mockJSONResponse(resp, exchange.KrakenResponse{Error: []string{"EQuery:Unknown asset pair"}})
+		default:
+			return nil, fmt.Errorf("unknown exchange in URL: %s", req.URL.String())
 		}
-		return mockJSONResponse(resp, binanceResponse)
-
-	case strings.Contains(req.URL.String(), "bybit"):
-		bybitResponse := exchange.BybitResponse{
-			RetCode: 10001,
-			RetMsg:  "Not supported symbols",
-		}
-		return mockJSONResponse(resp, bybitResponse)
-
-	case strings.Contains(req.URL.String(), "bitget"):
-		bitgetResponse := exchange.BitgetResponse{
-			Code: "40034",
-			Msg:  "Parameter does not exist",
-		}
-		return mockJSONResponse(resp, bitgetResponse)
-
-	default:
-		return nil, fmt.Errorf("unknown exchange in URL: %s", req.URL.String())
 	}
 }
+
+var (
+	mockInvalidPairResponse = mockPairErrorResponse(-1100, "Illegal characters found in parameter 'symbol'; legal range is '^[A-Z0-9_.]{1,20}$'.")
+	mockEmptyPairResponse   = mockPairErrorResponse(-1105, "Parameter 'symbol' was empty.")
+)
 
 func mockJSONResponse(resp *http.Response, data interface{}) (*http.Response, error) {
 	jsonResponse, err := json.Marshal(data)
@@ -267,7 +248,7 @@ func TestServer_Start(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Server{
-				listener: &mockHttpServer{
+				listener: &mockHTTPServer{
 					listenAndServeFunc: func() error {
 						return tt.serverError
 					},
@@ -288,7 +269,7 @@ func TestServer_Start(t *testing.T) {
 func TestServer_HandleIndex(t *testing.T) {
 	tmpDir := t.TempDir()
 	templateDir := filepath.Join(tmpDir, "web", "template")
-	err := os.MkdirAll(templateDir, 0755)
+	err := os.MkdirAll(templateDir, 0o750)
 	assert.NoError(t, err)
 
 	indexHTML := `<!DOCTYPE html>
@@ -303,12 +284,13 @@ func TestServer_HandleIndex(t *testing.T) {
 </body>
 </html>`
 
-	err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(indexHTML), 0644)
+	err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(indexHTML), 0o600)
 	assert.NoError(t, err)
 
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(tmpDir)
+	oldWd, err := os.Getwd()
+	assert.NoError(t, err)
+	defer func() { _ = os.Chdir(oldWd) }()
+	assert.NoError(t, os.Chdir(tmpDir))
 
 	tests := []struct {
 		name           string
@@ -376,15 +358,15 @@ func TestServer_HandleIndex(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Server{
 				exchanges: exchanges,
-				listener: &mockHttpServer{
+				listener: &mockHTTPServer{
 					listenAndServeFunc: func() error { return nil },
 				},
-				client: &mockHttpClient{
+				client: &mockHTTPClient{
 					doFunc: mockSuccessfulResponse,
 				},
 			}
 
-			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req := httptest.NewRequest(tt.method, tt.path, http.NoBody)
 			if tt.acceptEncoding != "" {
 				req.Header.Set("Accept-Encoding", tt.acceptEncoding)
 			}
@@ -404,7 +386,7 @@ func TestServer_HandleIndex(t *testing.T) {
 				if w.Header().Get("Content-Encoding") == "gzip" {
 					gr, err := gzip.NewReader(w.Body)
 					assert.NoError(t, err)
-					defer gr.Close()
+					defer func() { _ = gr.Close() }()
 
 					decompressed, err := io.ReadAll(gr)
 					assert.NoError(t, err)
@@ -426,15 +408,15 @@ func TestServer_HandleIndex(t *testing.T) {
 func TestServer_HandleIndex_TemplateNotFound(t *testing.T) {
 	s := &Server{
 		exchanges: exchanges,
-		listener: &mockHttpServer{
+		listener: &mockHTTPServer{
 			listenAndServeFunc: func() error { return nil },
 		},
-		client: &mockHttpClient{
+		client: &mockHTTPClient{
 			doFunc: mockSuccessfulResponse,
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	w := httptest.NewRecorder()
 
 	s.HandleIndex(w, req)
@@ -443,76 +425,64 @@ func TestServer_HandleIndex_TemplateNotFound(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "no such file or directory")
 }
 
-func TestServer_HandleIndex_InvalidTemplateSyntax(t *testing.T) {
-	tmpDir := t.TempDir()
-	templateDir := filepath.Join(tmpDir, "web", "template")
-	err := os.MkdirAll(templateDir, 0755)
-	assert.NoError(t, err)
-
-	invalidHTML := `<html><body>{{range}}</body></html>`
-	err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(invalidHTML), 0644)
-	assert.NoError(t, err)
-
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(tmpDir)
-
-	s := &Server{
-		exchanges: exchanges,
-		listener: &mockHttpServer{
-			listenAndServeFunc: func() error { return nil },
+func TestServer_HandleIndex_TemplateFail(t *testing.T) {
+	tests := []struct {
+		name         string
+		html         string
+		expectedBody string
+	}{
+		{
+			name:         "invalid template syntax",
+			html:         `<html><body>{{range}}</body></html>`,
+			expectedBody: "range",
 		},
-		client: &mockHttpClient{
-			doFunc: mockSuccessfulResponse,
+		{
+			name:         "template execute error",
+			html:         `<html><body>{{printf .NonExistent}}</body></html>`,
+			expectedBody: "Internal server error",
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	w := httptest.NewRecorder()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			templateDir := filepath.Join(tmpDir, "web", "template")
+			err := os.MkdirAll(templateDir, 0o750)
+			assert.NoError(t, err)
 
-	s.HandleIndex(w, req)
+			err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(tt.html), 0o600)
+			assert.NoError(t, err)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "range")
-}
+			oldWd, err := os.Getwd()
+			assert.NoError(t, err)
+			defer func() { _ = os.Chdir(oldWd) }()
+			assert.NoError(t, os.Chdir(tmpDir))
 
-func TestServer_HandleIndex_TemplateExecuteError(t *testing.T) {
-	tmpDir := t.TempDir()
-	templateDir := filepath.Join(tmpDir, "web", "template")
-	err := os.MkdirAll(templateDir, 0755)
-	assert.NoError(t, err)
+			s := &Server{
+				exchanges: exchanges,
+				listener: &mockHTTPServer{
+					listenAndServeFunc: func() error { return nil },
+				},
+				client: &mockHTTPClient{
+					doFunc: mockSuccessfulResponse,
+				},
+			}
 
-	errorHTML := `<html><body>{{printf .NonExistent}}</body></html>`
-	err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(errorHTML), 0644)
-	assert.NoError(t, err)
+			req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+			w := httptest.NewRecorder()
 
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(tmpDir)
+			s.HandleIndex(w, req)
 
-	s := &Server{
-		exchanges: exchanges,
-		listener: &mockHttpServer{
-			listenAndServeFunc: func() error { return nil },
-		},
-		client: &mockHttpClient{
-			doFunc: mockSuccessfulResponse,
-		},
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+			assert.Contains(t, w.Body.String(), tt.expectedBody)
+		})
 	}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	w := httptest.NewRecorder()
-
-	s.HandleIndex(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "Internal server error")
 }
 
 func TestServer_HandleIndex_GzipCompression(t *testing.T) {
 	tmpDir := t.TempDir()
 	templateDir := filepath.Join(tmpDir, "web", "template")
-	err := os.MkdirAll(templateDir, 0755)
+	err := os.MkdirAll(templateDir, 0o750)
 	assert.NoError(t, err)
 
 	largeHTML := `<!DOCTYPE html><html><head><title>Large Page</title></head><body>`
@@ -521,12 +491,13 @@ func TestServer_HandleIndex_GzipCompression(t *testing.T) {
 	}
 	largeHTML += `</body></html>`
 
-	err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(largeHTML), 0644)
+	err = os.WriteFile(filepath.Join(templateDir, "index.html"), []byte(largeHTML), 0o600)
 	assert.NoError(t, err)
 
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(tmpDir)
+	oldWd, err := os.Getwd()
+	assert.NoError(t, err)
+	defer func() { _ = os.Chdir(oldWd) }()
+	assert.NoError(t, os.Chdir(tmpDir))
 
 	tests := []struct {
 		name           string
@@ -554,15 +525,15 @@ func TestServer_HandleIndex_GzipCompression(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Server{
 				exchanges: exchanges,
-				listener: &mockHttpServer{
+				listener: &mockHTTPServer{
 					listenAndServeFunc: func() error { return nil },
 				},
-				client: &mockHttpClient{
+				client: &mockHTTPClient{
 					doFunc: mockSuccessfulResponse,
 				},
 			}
 
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 			if tt.acceptEncoding != "" {
 				req.Header.Set("Accept-Encoding", tt.acceptEncoding)
 			}
@@ -577,7 +548,7 @@ func TestServer_HandleIndex_GzipCompression(t *testing.T) {
 
 				gr, err := gzip.NewReader(w.Body)
 				assert.NoError(t, err)
-				defer gr.Close()
+				defer func() { _ = gr.Close() }()
 
 				decompressed, err := io.ReadAll(gr)
 				assert.NoError(t, err)
@@ -608,6 +579,7 @@ func TestServer_HandleSpot(t *testing.T) {
 				"binance": 50 * time.Millisecond,
 				"bybit":   100 * time.Millisecond,
 				"bitget":  150 * time.Millisecond,
+				"kraken":  200 * time.Millisecond,
 			}),
 			expectedStatus:   http.StatusOK,
 			expectedResponse: "99999.990000",
@@ -621,6 +593,7 @@ func TestServer_HandleSpot(t *testing.T) {
 				"binance": 50 * time.Millisecond,
 				"bybit":   100 * time.Millisecond,
 				"bitget":  150 * time.Millisecond,
+				"kraken":  200 * time.Millisecond,
 			}),
 			expectedStatus:   http.StatusOK,
 			expectedResponse: `{"pair":"BTCUSDT","price":99999.99,"source":"binance"}`,
@@ -659,12 +632,12 @@ func TestServer_HandleSpot(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Server{
 				exchanges: exchanges,
-				client: &mockHttpClient{
+				client: &mockHTTPClient{
 					doFunc: tt.mockResponse,
 				},
 			}
 
-			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req := httptest.NewRequest(tt.method, tt.path, http.NoBody)
 			w := httptest.NewRecorder()
 
 			s.HandleSpot(w, req)
@@ -702,6 +675,7 @@ func TestServer_firstPriceWithDetails(t *testing.T) {
 				"binance": 50 * time.Millisecond,
 				"bybit":   100 * time.Millisecond,
 				"bitget":  150 * time.Millisecond,
+				"kraken":  200 * time.Millisecond,
 			}),
 			expectedPrice:  99999.99,
 			expectedSource: "binance",
@@ -716,6 +690,7 @@ func TestServer_firstPriceWithDetails(t *testing.T) {
 				"bitget: code=40034, msg=Parameter does not exist",
 				"bybit: code=10001, msg=Not supported symbols",
 				"binance: code=-1100, msg=Illegal characters found in parameter 'symbol'; legal range is '^[A-Z0-9_.]{1,20}$'.",
+				"kraken: code=EQuery, msg=Unknown asset pair",
 			},
 		},
 		{
@@ -727,6 +702,7 @@ func TestServer_firstPriceWithDetails(t *testing.T) {
 				"binance: code=-1105, msg=Parameter 'symbol' was empty.",
 				"bybit: code=10001, msg=Not supported symbols",
 				"bitget: code=40034, msg=Parameter does not exist",
+				"kraken: code=EQuery, msg=Unknown asset pair",
 			},
 		},
 	}
@@ -735,7 +711,7 @@ func TestServer_firstPriceWithDetails(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Server{
 				exchanges: exchanges,
-				client: &mockHttpClient{
+				client: &mockHTTPClient{
 					doFunc: tt.mockResponse,
 				},
 			}
@@ -851,19 +827,39 @@ func TestServer_fetchPrice(t *testing.T) {
 			mockResponse: mockEmptyPairResponse,
 			expectError:  true,
 		},
+		{
+			name:          "kraken success",
+			exchange:      exchanges[3],
+			pair:          "USDTUSD",
+			mockResponse:  mockSuccessfulResponse,
+			expectedPrice: 99999.96,
+		},
+		{
+			name:         "kraken error",
+			exchange:     exchanges[3],
+			pair:         "USDTUSD",
+			mockResponse: mockErrorResponse,
+			expectError:  true,
+		},
+		{
+			name:         "kraken invalid pair",
+			exchange:     exchanges[3],
+			pair:         "INVALID",
+			mockResponse: mockInvalidPairResponse,
+			expectError:  true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 
-			server.client = &mockHttpClient{
+			server.client = &mockHTTPClient{
 				doFunc: tt.mockResponse,
 			}
 
 			price, err := server.fetchPrice(ctx, tt.exchange, tt.pair)
 			if tt.expectError {
-				// t.Log(tt.exchange.Name, tt.pair, err)
 				assert.Error(t, err)
 				return
 			}

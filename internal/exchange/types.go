@@ -1,3 +1,4 @@
+// Package exchange provides types and utilities for cryptocurrency exchange integrations.
 package exchange
 
 import "fmt"
@@ -10,12 +11,14 @@ const (
 	BINANCE Name = iota
 	BYBIT
 	BITGET
+	KRAKEN
 )
 
 var names = [...]string{
 	BINANCE: "binance",
 	BYBIT:   "bybit",
 	BITGET:  "bitget",
+	KRAKEN:  "kraken",
 }
 
 // String returns exchange name
@@ -65,11 +68,20 @@ type BitgetResponse struct {
 	} `json:"data"`
 }
 
+// KrakenResponse represents Kraken API response
+type KrakenResponse struct {
+	Error  []string `json:"error"`
+	Result map[string]struct {
+		C [2]string `json:"c"` // last trade: [price, lot_volume]
+	} `json:"result"`
+}
+
 func baseURLs() map[Name]string {
 	return map[Name]string{
 		BINANCE: "https://api.binance.com",
 		BYBIT:   "https://api.bybit.com",
 		BITGET:  "https://api.bitget.com",
+		KRAKEN:  "https://api.kraken.com",
 	}
 }
 
@@ -78,6 +90,7 @@ func pricePaths() map[Name]string {
 		BINANCE: "api/v3/ticker/price",
 		BYBIT:   "v5/market/tickers",
 		BITGET:  "api/v2/spot/market/tickers",
+		KRAKEN:  "0/public/Ticker",
 	}
 }
 
@@ -92,8 +105,12 @@ func New(name Name) *Exchange {
 
 // PriceURL returns complete URL for price request
 func (e *Exchange) PriceURL(pair string) string {
-	if e.Name == BYBIT {
+	switch e.Name {
+	case BYBIT:
 		return fmt.Sprintf("%s/%s?category=spot&symbol=%s", e.BaseURL, e.PricePath, pair)
+	case KRAKEN:
+		return fmt.Sprintf("%s/%s?pair=%s", e.BaseURL, e.PricePath, pair)
+	default:
+		return fmt.Sprintf("%s/%s?symbol=%s", e.BaseURL, e.PricePath, pair)
 	}
-	return fmt.Sprintf("%s/%s?symbol=%s", e.BaseURL, e.PricePath, pair)
 }

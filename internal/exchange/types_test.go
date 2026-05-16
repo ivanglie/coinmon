@@ -23,6 +23,10 @@ func TestName_String(t *testing.T) {
 			name:     BITGET,
 			expected: "bitget",
 		},
+		{
+			name:     KRAKEN,
+			expected: "kraken",
+		},
 	}
 
 	for _, tt := range tests {
@@ -52,6 +56,11 @@ func TestNew(t *testing.T) {
 			name:         BITGET,
 			expectedURL:  "https://api.bitget.com",
 			expectedPath: "api/v2/spot/market/tickers",
+		},
+		{
+			name:         KRAKEN,
+			expectedURL:  "https://api.kraken.com",
+			expectedPath: "0/public/Ticker",
 		},
 	}
 
@@ -89,6 +98,12 @@ func TestExchange_PriceURL(t *testing.T) {
 			exchange:    New(BITGET),
 			pair:        "BTCUSDT",
 			expectedURL: "https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT",
+		},
+		{
+			name:        "kraken price url",
+			exchange:    New(KRAKEN),
+			pair:        "BTCUSDT",
+			expectedURL: "https://api.kraken.com/0/public/Ticker?pair=BTCUSDT",
 		},
 	}
 
