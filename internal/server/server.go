@@ -101,7 +101,7 @@ func (s *Server) rateLimit(next http.HandlerFunc) http.HandlerFunc {
 		mu.Lock()
 		l, ok := limiters[ip]
 		if !ok {
-			l = &ipLimiter{limiter: rate.NewLimiter(rate.Every(time.Second), 5)}
+			l = &ipLimiter{limiter: rate.NewLimiter(rate.Every(1*time.Second), 50)}
 			limiters[ip] = l
 		}
 		l.lastSeen = time.Now()
