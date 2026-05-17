@@ -48,4 +48,4 @@ jobs:
           echo ${{ secrets.PASSWORD }} | sudo -S docker rm -f coinmon-api
           echo ${{ secrets.PASSWORD }} | sudo -S docker rm -f coinmon-proxy
 
-          echo ${{ secrets.PASSWORD }} | sudo -S docker compose -f /usr/src/coinmon/docker-compose.yml down -v && docker compose -f /usr/src/coinmon/docker-compose.yml --env-file /usr/src/coinmon/.env up -d"
+          echo ${{ secrets.PASSWORD }} | sudo -S docker compose -f /usr/src/coinmon/docker-compose.yml down && docker compose -f /usr/src/coinmon/docker-compose.yml --env-file /usr/src/coinmon/.env up -d"
