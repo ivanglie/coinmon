@@ -164,7 +164,7 @@ func (s *Server) HandleSpot(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		w.Header().Set("Content-Type", "text/plain")
-		if _, err := fmt.Fprintf(w, "%f", price); err != nil {
+		if _, err := fmt.Fprintf(w, "%g", price); err != nil {
 			log.Error("Failed to write response: " + err.Error())
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
