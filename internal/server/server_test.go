@@ -582,7 +582,7 @@ func TestServer_HandleSpot(t *testing.T) {
 				"kraken":  200 * time.Millisecond,
 			}),
 			expectedStatus:   http.StatusOK,
-			expectedResponse: "99999.990000",
+			expectedResponse: "99999.99",
 			expectedContains: false,
 		},
 		{
