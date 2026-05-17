@@ -738,6 +738,44 @@ func TestServer_firstPriceWithDetails(t *testing.T) {
 	}
 }
 
+func TestServer_RateLimit(t *testing.T) {
+	s := &Server{}
+	handler := s.rateLimit(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	for i := range 10 {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/spot/BTCUSDT", http.NoBody)
+		req.Header.Set("Cf-Connecting-Ip", "1.2.3.4")
+		w := httptest.NewRecorder()
+
+		handler(w, req)
+
+		if i < 5 {
+			assert.Equal(t, http.StatusOK, w.Code, "request %d should pass", i+1)
+		} else {
+			assert.Equal(t, http.StatusTooManyRequests, w.Code, "request %d should be limited", i+1)
+		}
+	}
+}
+
+func TestServer_RateLimit_DifferentIPs(t *testing.T) {
+	s := &Server{}
+	handler := s.rateLimit(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	for _, ip := range []string{"1.1.1.1", "2.2.2.2", "3.3.3.3"} {
+		for range 5 {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/spot/BTCUSDT", http.NoBody)
+			req.Header.Set("Cf-Connecting-Ip", ip)
+			w := httptest.NewRecorder()
+			handler(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, "ip %s should not be limited", ip)
+		}
+	}
+}
+
 func TestServer_fetchPrice(t *testing.T) {
 	setupTest()
 	defer teardownTest()

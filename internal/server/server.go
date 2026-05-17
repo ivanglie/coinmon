@@ -9,13 +9,16 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ivanglie/coinmon/internal/exchange"
 	"github.com/ivanglie/coinmon/pkg/log"
+	"golang.org/x/time/rate"
 )
 
 // DetailedResponse represents detailed price response
@@ -23,6 +26,11 @@ type DetailedResponse struct {
 	Pair   string  `json:"pair"`
 	Price  float64 `json:"price"`
 	Source string  `json:"source"`
+}
+
+type ipLimiter struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
 }
 
 type httpServer interface {
@@ -63,9 +71,48 @@ func New(addr string) *Server {
 	}
 
 	http.HandleFunc("/", s.HandleIndex)
-	http.HandleFunc("/api/v1/spot/", s.HandleSpot)
+	http.HandleFunc("/api/v1/spot/", s.rateLimit(s.HandleSpot))
 
 	return s
+}
+
+func (s *Server) rateLimit(next http.HandlerFunc) http.HandlerFunc {
+	mu := sync.Mutex{}
+	limiters := make(map[string]*ipLimiter)
+
+	go func() {
+		for range time.Tick(5 * time.Minute) {
+			mu.Lock()
+			for ip, l := range limiters {
+				if time.Since(l.lastSeen) > 10*time.Minute {
+					delete(limiters, ip)
+				}
+			}
+			mu.Unlock()
+		}
+	}()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := r.Header.Get("Cf-Connecting-Ip")
+		if ip == "" {
+			ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+		}
+
+		mu.Lock()
+		l, ok := limiters[ip]
+		if !ok {
+			l = &ipLimiter{limiter: rate.NewLimiter(rate.Every(time.Second), 5)}
+			limiters[ip] = l
+		}
+		l.lastSeen = time.Now()
+		mu.Unlock()
+
+		if !l.limiter.Allow() {
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // Start starts the server
