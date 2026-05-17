@@ -744,14 +744,14 @@ func TestServer_RateLimit(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	for i := range 10 {
+	for i := range 60 {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/spot/BTCUSDT", http.NoBody)
 		req.Header.Set("Cf-Connecting-Ip", "1.2.3.4")
 		w := httptest.NewRecorder()
 
 		handler(w, req)
 
-		if i < 5 {
+		if i < 50 {
 			assert.Equal(t, http.StatusOK, w.Code, "request %d should pass", i+1)
 		} else {
 			assert.Equal(t, http.StatusTooManyRequests, w.Code, "request %d should be limited", i+1)
